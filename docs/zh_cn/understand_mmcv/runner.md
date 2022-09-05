@@ -37,7 +37,7 @@ def train(self, data_loader, **kwargs):
         # 验证时候 train_mode=False
         self.run_iter(data_batch, train_mode=True, **kwargs)
         self.call_hook('after_train_iter')
-   self.call_hook('after_train_epoch')
+    self.call_hook('after_train_epoch')
 ```
 
 ### IterBasedRunner

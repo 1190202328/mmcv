@@ -6,26 +6,29 @@ import torchvision.transforms as transforms
 from torch.utils.data import DataLoader
 from torchvision.datasets import CIFAR10
 
-from mmcv.parallel import MMDataParallel
+from mmcv.parallel import MMDataParallel, MMDistributedDataParallel
 from mmcv.runner import EpochBasedRunner
 from mmcv.utils import get_logger
+from mmcv.cnn import ConvModule
 
 
 class Model(nn.Module):
 
     def __init__(self):
         super().__init__()
-        self.conv1 = nn.Conv2d(3, 6, 5)
+        # conv + bn + relu
+        self.conv1 = ConvModule(3, 6, 5, norm_cfg=dict(type='BN'))
         self.pool = nn.MaxPool2d(2, 2)
-        self.conv2 = nn.Conv2d(6, 16, 5)
+        # conv + bn + relu
+        self.conv2 = ConvModule(6, 16, 5, norm_cfg=dict(type='BN'))
         self.fc1 = nn.Linear(16 * 5 * 5, 120)
         self.fc2 = nn.Linear(120, 84)
         self.fc3 = nn.Linear(84, 10)
         self.loss_fn = nn.CrossEntropyLoss()
 
     def forward(self, x):
-        x = self.pool(F.relu(self.conv1(x)))
-        x = self.pool(F.relu(self.conv2(x)))
+        x = self.pool(self.conv1(x))
+        x = self.pool(self.conv2(x))
         x = x.view(-1, 16 * 5 * 5)
         x = F.relu(self.fc1(x))
         x = F.relu(self.fc2(x))
@@ -44,6 +47,7 @@ if __name__ == '__main__':
     if torch.cuda.is_available():
         # only use gpu:0 to train
         # Solved issue https://github.com/open-mmlab/mmcv/issues/1470
+
         model = MMDataParallel(model.cuda(), device_ids=[0])
 
     # dataset and dataloader
@@ -51,10 +55,14 @@ if __name__ == '__main__':
         transforms.ToTensor(),
         transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
     ])
-    trainset = CIFAR10(
+    train_set = CIFAR10(
         root='data', train=True, download=True, transform=transform)
-    trainloader = DataLoader(
-        trainset, batch_size=128, shuffle=True, num_workers=2)
+    train_loader = DataLoader(
+        train_set, batch_size=128, shuffle=True, num_workers=2)
+    test_set = CIFAR10(
+        root='data', train=False, download=True, transform=transform)
+    test_loader = DataLoader(
+        test_set, batch_size=128, shuffle=True, num_workers=2)
 
     optimizer = optim.SGD(model.parameters(), lr=0.001, momentum=0.9)
     logger = get_logger('mmcv')
@@ -81,4 +89,8 @@ if __name__ == '__main__':
         checkpoint_config=checkpoint_config,
         log_config=log_config)
 
-    runner.run([trainloader], [('train', 1)])
+    runner.run([train_loader], [('train', 1)])
+
+    # runner.run([test_loader], [('test', 1)])
+    # 运行命令 单卡 python train.py
+    # 运行命令[x]，目前没有实现 多卡 python -m torch.distributed.launch --nproc_per_node=4 train.py
