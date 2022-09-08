@@ -23,6 +23,7 @@ from mmcv.parallel import MMDataParallel, MMDistributedDataParallel
 from mmcv.runner import EpochBasedRunner
 from mmcv.utils import get_logger
 from mmcv.cnn import ConvModule
+from mmcv.cnn.bricks.transformer import BaseTransformerLayer
 
 
 class Model(nn.Module):
@@ -30,18 +31,23 @@ class Model(nn.Module):
     def __init__(self):
         super().__init__()
         # conv + bn + relu
-        self.conv1 = ConvModule(3, 6, 5, norm_cfg=dict(type='BN'))
-        self.pool = nn.MaxPool2d(2, 2)
+        self.conv1 = ConvModule(3, 128, 3, norm_cfg=dict(type='BN'))
         # conv + bn + relu
-        self.conv2 = ConvModule(6, 16, 5, norm_cfg=dict(type='BN'))
+        self.conv2 = ConvModule(128, 256, 3, norm_cfg=dict(type='BN'))
+        self.transformer = BaseTransformerLayer()
         self.fc1 = nn.Linear(16 * 5 * 5, 120)
         self.fc2 = nn.Linear(120, 84)
         self.fc3 = nn.Linear(84, 10)
         self.loss_fn = nn.CrossEntropyLoss()
 
     def forward(self, x):
-        x = self.pool(self.conv1(x))
-        x = self.pool(self.conv2(x))
+        x = self.conv1(x)
+        x = self.conv2(x)
+        print(x.shape)
+        x = self.transformer(x)
+        print(x.shape)
+
+        raise Exception
         x = x.view(-1, 16 * 5 * 5)
         x = F.relu(self.fc1(x))
         x = F.relu(self.fc2(x))
