@@ -1,3 +1,16 @@
+import socket
+
+import wandb
+
+wandb.init(
+    project="mmcv_test",
+    entity="jingjiang",
+    notes=socket.gethostname(),
+    name="mmcv_test",
+    job_type="training",
+    reinit=True
+)
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -39,10 +52,27 @@ class Model(nn.Module):
         images, labels = data
         predicts = self(images)  # -> self.__call__() -> self.forward()
         loss = self.loss_fn(predicts, labels)
+        wandb.log({"loss": loss})
         return {'loss': loss}
+
+    def val_step(self, data, opimizer):
+        images, labels = data
+        with torch.no_grad():
+            predicts = self(images)
+            predicts = torch.argmax(predicts, dim=1)
+        correct = labels.shape[0]
+        acc = (labels == predicts).sum()
+        wandb.log({'acc': acc.cpu().data / correct})
+        return {'gt': labels, 'pred': predicts}
 
 
 if __name__ == '__main__':
+    wandb.config = {
+        "lr": 0.001,
+        "momentum": 0.9,
+        "epochs": 4,
+        "batch_size": 128
+    }
     model = Model()
     if torch.cuda.is_available():
         # only use gpu:0 to train
@@ -58,13 +88,13 @@ if __name__ == '__main__':
     train_set = CIFAR10(
         root='data', train=True, download=True, transform=transform)
     train_loader = DataLoader(
-        train_set, batch_size=128, shuffle=True, num_workers=2)
+        train_set, batch_size=wandb.config['batch_size'], shuffle=True, num_workers=2)
     test_set = CIFAR10(
         root='data', train=False, download=True, transform=transform)
     test_loader = DataLoader(
-        test_set, batch_size=128, shuffle=True, num_workers=2)
+        test_set, batch_size=wandb.config['batch_size'], shuffle=True, num_workers=2)
 
-    optimizer = optim.SGD(model.parameters(), lr=0.001, momentum=0.9)
+    optimizer = optim.SGD(model.parameters(), lr=wandb.config['lr'], momentum=wandb.config['momentum'])
     logger = get_logger('mmcv')
     # runner is a scheduler to manage the training
     runner = EpochBasedRunner(
@@ -72,7 +102,7 @@ if __name__ == '__main__':
         optimizer=optimizer,
         work_dir='./work_dir',
         logger=logger,
-        max_epochs=4)
+        max_epochs=wandb.config['epochs'])
 
     # learning rate scheduler config
     lr_config = dict(policy='step', step=[2, 3])
@@ -82,6 +112,7 @@ if __name__ == '__main__':
     checkpoint_config = dict(interval=1)
     # save log periodically and multiple hooks can be used simultaneously
     log_config = dict(interval=100, hooks=[dict(type='TextLoggerHook')])
+
     # register hooks to runner and those hooks will be invoked automatically
     runner.register_training_hooks(
         lr_config=lr_config,
@@ -89,7 +120,10 @@ if __name__ == '__main__':
         checkpoint_config=checkpoint_config,
         log_config=log_config)
 
-    runner.run([train_loader], [('train', 1)])
+    wandb.watch(model)
+    print('***')
+    print(type(runner))
+    runner.run([train_loader, test_loader], [('train', 1), ('val', 1)])
 
     # runner.run([test_loader], [('test', 1)])
     # 运行命令 单卡 python train.py
